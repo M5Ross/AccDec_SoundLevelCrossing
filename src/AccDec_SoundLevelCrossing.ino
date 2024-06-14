@@ -30,7 +30,7 @@
 #define DECODER_ID 7
 
 #define HW_VERSION 10
-#define SW_VERSION 31
+#define SW_VERSION 33
 
 #include <NmraDcc.h>
 #include <Servo.h>
@@ -43,6 +43,7 @@ Servo servo[4];
 #define RICHIEDI_APERTURA 3
 #define STA_CHIUDENDO 4
 #define STA_APRENDO 5
+#define RICHIEDI_CHIUSURA_NO_SUONO 6
 
 #define LIBERO    0b00
 #define DESTRO    0b01
@@ -276,7 +277,7 @@ void aggiornaCV() {
     for (byte i=0; i < 4; i++) {
       posizioneApertoServi[i] = (int)Dcc.getCV( 33+i*3 ); // in gradi °
       posizioneChiusoServi[i] = (int)Dcc.getCV( 34+i*3 ); // in gradi °
-      posizioneAttualeServi[i] = (int)Dcc.getCV( 35+i*3 ); // in gradi °
+      posizioneAttualeServi[i] = posizioneApertoServi[i]; //(int)Dcc.getCV( 35+i*3 ); // in gradi °
       ritardoChiusuraBarriera[i] = (int)Dcc.getCV( 45+i ) * 50;
       ritardoAperturaBarriera[i] = (int)Dcc.getCV( 49+i ) * 50;
       // attaches servo on pin to the servo object
@@ -704,9 +705,15 @@ void loop()   //****************************************************************
   if(tipoControllo == 2 && occupato == LIBERO) { // controllo con DCC
     if(statoDCC) {
       // DCC chiede la chiusura
-      if(STATO == LIBERO || STATO == STA_APRENDO) {
+      if(STATO == LIBERO) {
         // richiedi la chiusura
         STATO = RICHIEDI_CHIUSURA;
+        digitalWrite(LED, 1);
+        LEDTime = millis();
+      }
+      if(STATO == STA_APRENDO) {
+        // richiedi la chiusura
+        STATO = RICHIEDI_CHIUSURA_NO_SUONO;
         digitalWrite(LED, 1);
         LEDTime = millis();
       }
@@ -723,7 +730,7 @@ void loop()   //****************************************************************
   }
 
   // effettua apertura o chiusura se richiesto
-  if(STATO == RICHIEDI_CHIUSURA) {
+  if(STATO == RICHIEDI_CHIUSURA || STATO == RICHIEDI_CHIUSURA_NO_SUONO) {
 
     #ifdef DEBUG
     Serial.println("richiesta chiusura");
@@ -733,7 +740,9 @@ void loop()   //****************************************************************
       servoTime[i] = millis();
       //posizioneAttualeServi[i] = posizioneApertoServi[i];
       fine[i] = 0;
-      prima = true;
+      if (STATO == RICHIEDI_CHIUSURA) {
+        prima = true; 
+      }
     }
     STATO = STA_CHIUDENDO;
   }
@@ -815,21 +824,27 @@ void loop()   //****************************************************************
       if((isTime(&servoTime[i], ritardoChiusuraBarriera[i]) || vai[i] == 1) && !fine[i]) {
         vai[i] = 1;
         if(isTime(&servoTime2[i], velocitaServi)) {
-          if(posizioneApertoServi[i] <= posizioneChiusoServi[i]) {
-            posizioneAttualeServi[i]++;
+          if(posizioneAttualeServi[i] > posizioneChiusoServi[i]) {
+            posizioneAttualeServi[i]--;
+            if(posizioneAttualeServi[i] < posizioneChiusoServi[i]) {
+              posizioneAttualeServi[i] = posizioneChiusoServi[i];
+              fine[i] = 1;
+            }
           }
           else {
-            posizioneAttualeServi[i]--;
-          }
-          if(posizioneAttualeServi[i] > posizioneChiusoServi[i]) {
-            posizioneAttualeServi[i] = posizioneChiusoServi[i];
-            fine[i] = 1;
+            posizioneAttualeServi[i]++;
+            if(posizioneAttualeServi[i] > posizioneChiusoServi[i]) {
+              posizioneAttualeServi[i] = posizioneChiusoServi[i];
+              fine[i] = 1;
+            }
           }
           servo[i].write(posizioneAttualeServi[i]);
-          /*Serial.print("posizione C servo ");
+          #ifdef DEBUG
+          Serial.print("posizione C servo ");
           Serial.print(i+1);
           Serial.print(" = ");
-          Serial.println(posizioneAttualeServi[i]);*/
+          Serial.println(posizioneAttualeServi[i]);
+          #endif
         }
       }
     }
@@ -846,21 +861,27 @@ void loop()   //****************************************************************
       if((isTime(&servoTime[i], ritardoAperturaBarriera[i]) || vai[i] == 1) && !fine[i]) {
         vai[i] = 1;
         if(isTime(&servoTime2[i], velocitaServi)) {
-          if(posizioneApertoServi[i] <= posizioneChiusoServi[i]) {
+          if(posizioneAttualeServi[i] > posizioneApertoServi[i]) {
             posizioneAttualeServi[i]--;
+            if(posizioneAttualeServi[i] < posizioneApertoServi[i]) {
+              posizioneAttualeServi[i] = posizioneApertoServi[i];
+              fine[i] = 1;
+            }
           }
           else {
             posizioneAttualeServi[i]++;
-          }
-          if(posizioneAttualeServi[i] < posizioneApertoServi[i]) {
-            posizioneAttualeServi[i] = posizioneApertoServi[i];
-            fine[i] = 1;
+            if(posizioneAttualeServi[i] > posizioneApertoServi[i]) {
+              posizioneAttualeServi[i] = posizioneApertoServi[i];
+              fine[i] = 1;
+            }
           }
           servo[i].write(posizioneAttualeServi[i]);
-          /*Serial.print("posizione A servo ");
+          #ifdef DEBUG
+          Serial.print("posizione A servo ");
           Serial.print(i+1);
           Serial.print(" = ");
-          Serial.println(posizioneAttualeServi[i]);*/
+          Serial.println(posizioneAttualeServi[i]);
+          #endif
         }
       }
     }
